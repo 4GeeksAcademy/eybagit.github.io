@@ -325,8 +325,8 @@ function createBackOfPortalCard() {
 	ctx.textBaseline = "middle";
 	ctx.shadowColor = "rgba(0, 255, 170, 0.7)";
 	ctx.shadowBlur = 15;
-	ctx.fillText("YOU'VE REACHED THE", canvas.width / 2, canvas.height / 2 - 30);
-	ctx.fillText("END OF THE INTERNET", canvas.width / 2, canvas.height / 2 + 30);
+	ctx.fillText("EYBAGIT", canvas.width / 2, canvas.height / 2 - 30);
+	ctx.fillText("¡PROXIMAMENTE!", canvas.width / 2, canvas.height / 2 + 30);
 	ctx.shadowBlur = 0;
 
 	// Create a texture from the canvas
