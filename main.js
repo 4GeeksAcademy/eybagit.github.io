@@ -1,798 +1,540 @@
 // Se asegura de que el DOM esté cargado antes de ejecutar el script
 document.addEventListener("DOMContentLoaded", function() {
-  const tunnelMessage = document.getElementById("tunnelMessage");
-
-  // Alterna la visibilidad del mensaje cada 4 segundos
-  setInterval(() => {
-    // Si la opacidad es 0 (o no está establecida), la ponemos en 1; de lo contrario, la volvemos a 0
-    if (tunnelMessage.style.opacity === "0" || tunnelMessage.style.opacity === "") {
-      tunnelMessage.style.opacity = "1"; // Muestra el mensaje
+    const tunnelMessage = document.getElementById("tunnelMessage");
+    if (tunnelMessage) { // Check if element exists
+        setInterval(() => {
+            if (tunnelMessage.style.opacity === "0" || tunnelMessage.style.opacity === "") {
+                tunnelMessage.style.opacity = "1";
+            } else {
+                tunnelMessage.style.opacity = "0";
+            }
+        }, 4000);
     } else {
-      tunnelMessage.style.opacity = "0"; // Oculta el mensaje
+        console.error("Elemento con ID 'tunnelMessage' no encontrado.");
     }
-  }, 4000); // Intervalo en milisegundos (4000 ms = 4 segundos)
+
+    // Card background particle effect
+    (function() {
+        const canvas = document.getElementById("cardBgEffect");
+        if (!canvas) {
+            console.error("Elemento con ID 'cardBgEffect' no encontrado.");
+            return; // Exit if canvas not found
+        }
+        if (!canvas.parentElement) {
+            console.error("Elemento 'cardBgEffect' no tiene un elemento padre.");
+            return;
+        }
+        const ctx = canvas.getContext("2d");
+
+        function resize() {
+            // Asegurarse de que parentElement exista antes de acceder a offsetWidth/Height
+            if (canvas.parentElement) {
+                canvas.width = canvas.parentElement.offsetWidth;
+                canvas.height = canvas.parentElement.offsetHeight;
+            }
+        }
+        resize();
+        window.addEventListener("resize", resize);
+
+        const particles = [];
+        const particleCount = 25;
+
+        for (let i = 0; i < particleCount; i++) {
+            particles.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                radius: Math.random() * 1.5 + 0.5,
+                vx: Math.random() * 1 - 0.5,
+                vy: Math.random() * 1 - 0.5,
+                color: `rgba(200, 220, 255, ${Math.random() * 0.3 + 0.3})`
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < particleCount; i++) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+                if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                for (let j = i + 1; j < particleCount; j++) {
+                    const p2 = particles[j];
+                    const distance = Math.sqrt(Math.pow(p.x - p2.x, 2) + Math.pow(p.y - p2.y, 2));
+                    if (distance < 60) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = `rgba(200, 220, 255, ${0.03 * (1 - distance / 60)})`;
+                        ctx.lineWidth = 0.3;
+                        ctx.moveTo(p.x, p.y);
+                        ctx.lineTo(p2.x, p2.y);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+        animate();
+    })();
+
+    // Portal and Tunnel Logic
+    const card = document.getElementById("portalCard");
+    const button = document.getElementById("portalButton");
+    const canvasTunnel = document.getElementById("tunnelCanvas"); // Asegúrate que el ID en HTML sea "tunnelCanvas"
+    const tunnelContainer = document.getElementById("tunnelContainer");
+
+    if (!card || !button || !canvasTunnel || !tunnelContainer) {
+        console.error("Faltan uno o más elementos del DOM para el portal/túnel.");
+        return;
+    }
+
+    if (card) card.addEventListener("click", startPortal);
+    if (button) button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        startPortal();
+    });
+
+    var renderer, scene, camera, tube;
+    var lights = [], path, organicPoints, pct = 0, pct2 = 0;
+    var renderFrameId;
+    let isAnimating = false;
+
+    let tunnelEndPoint; // No es necesario inicializar aquí si se asigna en initTunnel
+    let hoverTime = 0;
+    var w = window.innerWidth;
+    var h = window.innerHeight;
+
+    var cameraSpeed = 0.00018;
+    var lightSpeed = 0.0012;
+    var tubularSegments = 600;
+    var radialSegments = 8;
+    var tubeRadius = 3;
+
+    function startPortal() {
+        if (isAnimating) return;
+        isAnimating = true; // Establecer al inicio para evitar múltiples llamadas rápidas
+
+        document.body.style.backgroundImage = "none";
+        document.body.style.backgroundColor = "#000000";
+
+        if (canvasTunnel) canvasTunnel.style.display = "block";
+        if (tunnelContainer) {
+            tunnelContainer.style.display = "flex";
+            tunnelContainer.classList.add("active");
+        }
+
+        if (!scene) { // Initialize Three.js scene only once
+            if (typeof THREE === 'undefined') {
+                console.error("Three.js no está cargado. Asegúrate de que el script de Three.js esté incluido y se cargue antes que este script.");
+                isAnimating = false; // Restablecer si no se puede inicializar
+                return;
+            }
+            initTunnel();
+        }
+        render(); // Iniciar el bucle de renderizado
+
+        setTimeout(() => {
+            if (canvasTunnel) canvasTunnel.classList.add("active");
+            if (card) card.classList.add("zoomIn");
+            setTimeout(() => {
+                if (card) card.style.display = "none";
+            }, 2000);
+        }, 100);
+    }
+
+    function createCircularPath() {
+        const points = [];
+        const totalPoints = 200;
+        const controlPoints = [
+            new THREE.Vector3(0, 0, 0), new THREE.Vector3(20, 10, -50),
+            new THREE.Vector3(40, -10, -100), new THREE.Vector3(60, 15, -150),
+            new THREE.Vector3(50, -5, -200), new THREE.Vector3(0, 0, -250),
+            new THREE.Vector3(-100, 0, -200), new THREE.Vector3(-150, 0, -100),
+            new THREE.Vector3(-100, 0, 0), new THREE.Vector3(-50, 10, 100),
+            new THREE.Vector3(-20, -10, 150), new THREE.Vector3(0, 0, 200)
+        ];
+        const curve = new THREE.CatmullRomCurve3(controlPoints);
+        curve.tension = 0.1;
+        for (let i = 0; i < totalPoints; i++) {
+            const t = i / (totalPoints - 1);
+            points.push(curve.getPoint(t));
+        }
+        return points;
+    }
+
+    function createBackOfPortalCard() {
+        const geometry = new THREE.PlaneGeometry(20, 28);
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 910;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "rgba(10, 12, 18, 0.8)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const gradient = ctx.createLinearGradient(canvas.width, canvas.height, 0, 0);
+        gradient.addColorStop(0, "#FFD700"); // Gold
+        gradient.addColorStop(1, "#DAA520"); // Darker Gold
+        ctx.fillStyle = gradient;
+        ctx.fillRect(5, 5, canvas.width - 10, canvas.height - 10); // fillRect with small padding
+
+        ctx.filter = "blur(8px)";
+        function drawBlob(x, y, wid, hei, color) {
+            const grad = ctx.createRadialGradient(x, y, 0, x, y, wid / 2);
+            grad.addColorStop(0, color);
+            grad.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.ellipse(x, y, wid / 2, hei / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        drawBlob(canvas.width * 0.3, canvas.height * 0.3, 150, 150, "rgba(255, 215, 0, 0.5)");
+        drawBlob(canvas.width * 0.7, canvas.height * 0.6, 120, 120, "rgba(218, 165, 32, 0.5)");
+        ctx.filter = "none";
+
+        ctx.font = "bold 30px Unica One";
+        ctx.fillStyle = "white";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+        ctx.shadowBlur = 10;
+        ctx.fillText("EYBAGIT", canvas.width / 2, canvas.height / 2 - 20);
+        ctx.font = "24px Unica One";
+        ctx.fillText("¡PROXIMAMENTE!", canvas.width / 2, canvas.height / 2 + 20);
+        ctx.shadowBlur = 0;
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0.95, side: THREE.DoubleSide });
+        return new THREE.Mesh(geometry, material);
+    }
+
+    function createCodeSnippetSprite(text) {
+        const canvas = document.createElement("canvas");
+        canvas.width = 320;
+        canvas.height = 180;
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "rgba(40, 40, 40, 0.6)"; // Semi-transparent dark background
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.font = "15px 'Consolas', monospace";
+        ctx.fillStyle = "#A9DC76"; // A greenish color for code text
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        const lines = text.split("\n");
+        const lineHeight = 18;
+
+        for (let i = 0; i < lines.length; i++) {
+            if (10 + i * lineHeight > canvas.height - 10) break; // Prevent overflow
+            ctx.fillText(lines[i], 10, 10 + i * lineHeight);
+        }
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            opacity: 0.9,
+            blending: THREE.AdditiveBlending
+        });
+        const sprite = new THREE.Sprite(material);
+        let scaleFactor = 7 + Math.random() * 9;
+        sprite.scale.set(scaleFactor, scaleFactor * (canvas.height / canvas.width), 1);
+        return sprite;
+    }
+
+    function createCircleTexture(colorStr = "rgba(255,255,255,1)") {
+        const canvas = document.createElement("canvas");
+        canvas.width = 32;
+        canvas.height = 32;
+        const context = canvas.getContext("2d");
+        context.beginPath();
+        context.arc(16, 16, 16, 0, 2 * Math.PI, false);
+        context.fillStyle = colorStr;
+        context.fill(); // Primera pasada de color sólido
+
+        // Gradiente para efecto de brillo suave
+        const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 16);
+        gradient.addColorStop(0, "rgba(255,255,255,1)"); // Centro brillante
+        gradient.addColorStop(0.4, colorStr); // Color principal
+        gradient.addColorStop(1, "rgba(0,0,0,0)"); // Transparente en los bordes
+
+        context.globalCompositeOperation = "source-over"; // Asegurar que se dibuje encima
+        context.fillStyle = gradient;
+        context.beginPath(); // Necesario reiniciar el path para el nuevo fill
+        context.arc(16, 16, 16, 0, 2 * Math.PI, false);
+        context.fill(); // Aplicar el gradiente
+        return canvas;
+    }
+
+
+    function initTunnel() {
+        renderer = new THREE.WebGLRenderer({
+            canvas: canvasTunnel, // Asegúrate que este ID exista en el HTML
+            antialias: true,
+            alpha: true,
+            powerPreference: "high-performance"
+        });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setSize(w, h);
+
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x281800, 0.0060); // Darker warm fog
+
+        camera = new THREE.PerspectiveCamera(70, w / h, 0.1, 1000);
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        if (canvasTunnel) { // Event listener solo si el canvas existe
+            canvasTunnel.addEventListener("click", function(event) {
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(scene.children, true);
+                for (let i = 0; i < intersects.length; i++) {
+                    if (intersects[i].object.userData && intersects[i].object.userData.isBackCard) {
+                        completePortalLoop();
+                        break;
+                    }
+                }
+            });
+        }
+
+
+        const starsCount = 1000;
+        const starsPositions = new Float32Array(starsCount * 3);
+        const starSpread = 1500;
+        for (let i = 0; i < starsCount; i++) {
+            starsPositions[i * 3] = THREE.MathUtils.randFloatSpread(starSpread);
+            starsPositions[i * 3 + 1] = THREE.MathUtils.randFloatSpread(starSpread);
+            starsPositions[i * 3 + 2] = THREE.MathUtils.randFloatSpread(starSpread * 1.2);
+        }
+        const starsGeometry = new THREE.BufferGeometry();
+        starsGeometry.setAttribute("position", new THREE.BufferAttribute(starsPositions, 3));
+
+        const starsTexture = new THREE.CanvasTexture(createCircleTexture("rgba(255, 230, 180, 0.9)"));
+        const starsMaterial = new THREE.PointsMaterial({
+            color: 0xFFE08D,
+            size: 1.4,
+            map: starsTexture,
+            transparent: true,
+            opacity: 0.9,
+            blending: THREE.AdditiveBlending
+        });
+        const starField = new THREE.Points(starsGeometry, starsMaterial);
+        scene.add(starField);
+
+        organicPoints = createCircularPath();
+        if (!organicPoints || organicPoints.length === 0) {
+            console.error("createCircularPath no devolvió puntos válidos.");
+            return; // No continuar si la ruta no es válida
+        }
+        path = new THREE.CatmullRomCurve3(organicPoints);
+        const tubeGeometry = new THREE.TubeBufferGeometry(path, tubularSegments, tubeRadius, radialSegments, false);
+
+        const tubeColors = [];
+        const goldColor1 = new THREE.Color(0xFFD700);
+        const goldColor2 = new THREE.Color(0xDAA520);
+        const accentColor = new THREE.Color(0xFF8C00);
+
+        for (let i = 0; i < tubeGeometry.attributes.position.count; i++) {
+            let color;
+            const phase = (i / (radialSegments * 2)) * Math.PI;
+            if (i % 3 === 0) color = goldColor1.clone().lerp(accentColor, (Math.sin(phase) + 1) / 2);
+            else if (i % 3 === 1) color = goldColor2.clone().lerp(goldColor1, (Math.cos(phase + Math.PI / 2) + 1) / 2);
+            else color = accentColor.clone().lerp(goldColor2, (Math.sin(phase + Math.PI) + 1) / 2);
+            tubeColors.push(color.r, color.g, color.b);
+        }
+        tubeGeometry.setAttribute("color", new THREE.Float32BufferAttribute(tubeColors, 3));
+
+        const tubeMaterial = new THREE.MeshLambertMaterial({
+            side: THREE.BackSide,
+            vertexColors: true,
+            wireframe: true,
+            emissive: 0x402800,
+            emissiveIntensity: 0.7
+        });
+        tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+        scene.add(tube);
+
+        const backOfCard = createBackOfPortalCard();
+        // Asegurarse de que organicPoints y sus índices sean válidos
+        if (organicPoints.length > 0) {
+            const endPointIndex = organicPoints.length - 1;
+            const cardPos = organicPoints[endPointIndex];
+            if (cardPos) {
+                backOfCard.position.set(cardPos.x, cardPos.y, cardPos.z);
+                tunnelEndPoint = cardPos; // Asignar aquí
+            }
+            // Solo hacer lookAt si el índice es válido
+            if (endPointIndex - 5 >= 0 && organicPoints[endPointIndex - 5]) {
+                 const lookAtPoint = organicPoints[endPointIndex - 5];
+                 if (!cardPos.equals(lookAtPoint)) { // Evitar lookAt en la misma posición
+                    backOfCard.lookAt(lookAtPoint);
+                 }
+            }
+            backOfCard.userData = { isBackCard: true };
+            scene.add(backOfCard);
+        }
+
+
+        scene.add(new THREE.AmbientLight(0x503010));
+        lights = [];
+        const lightColors = [0xFFE799, 0xFFC75C, 0xFAA43A];
+        for (let i = 0; i < 3; i++) {
+            let l = new THREE.PointLight(lightColors[i], 1.0, 40, 1.8);
+            lights.push(l);
+            scene.add(l);
+        }
+
+        const snippetVarieties = [
+            '<div class="portal-fx">\n <h1 class="glow-title">EYBAGIT</h1>\n <p>Loading multiverse...</p>\n</div>',
+            'const scene = new THREE.Scene();\nconst camera = new THREE.PerspectiveCamera();\nrenderer.render(scene, camera);',
+            '@keyframes pulse-gold {\n 0% { box-shadow: 0 0 10px #FFD700; }\n 50% { box-shadow: 0 0 30px #FF8C00; }\n 100% { box-shadow: 0 0 10px #DAA520; }\n}',
+            'body {\n background: #000;\n color: #FFD700;\n font-family: "Unica One";\n}'
+        ];
+        const numSnippets = 45;
+        // Verificar que organicPoints tenga al menos un punto
+        if (organicPoints && organicPoints.length > 0) {
+            const pathStartZ = organicPoints[0].z;
+            const pathEndZ = organicPoints[organicPoints.length-1].z;
+            const depthFactor = pathEndZ - pathStartZ;
+
+            for (let i = 0; i < numSnippets; i++) {
+                let snippet = snippetVarieties[Math.floor(Math.random() * snippetVarieties.length)];
+                let sprite = createCodeSnippetSprite(snippet);
+                const r = tubeRadius * 2 + Math.random() * tubeRadius * 5;
+                const angle = Math.random() * Math.PI * 2;
+                const depth = pathStartZ + Math.random() * depthFactor;
+
+                sprite.position.set(Math.cos(angle) * r, Math.sin(angle) * r * 0.7, depth);
+                sprite.material.rotation = (Math.random() - 0.5) * Math.PI * 0.5;
+                scene.add(sprite);
+            }
+        }
+
+
+        const additionalStarsCount = 2000;
+        const additionalStarSpread = 2000;
+        const additionalStarsPositions = new Float32Array(additionalStarsCount * 3);
+        for (let i = 0; i < additionalStarsCount; i++) {
+            additionalStarsPositions[i * 3] = THREE.MathUtils.randFloatSpread(additionalStarSpread);
+            additionalStarsPositions[i * 3 + 1] = THREE.MathUtils.randFloatSpread(additionalStarSpread);
+            additionalStarsPositions[i * 3 + 2] = THREE.MathUtils.randFloatSpread(additionalStarSpread * 1.2);
+        }
+        const additionalStarsGeometry = new THREE.BufferGeometry();
+        additionalStarsGeometry.setAttribute("position", new THREE.BufferAttribute(additionalStarsPositions, 3));
+        const additionalStarsMaterial = new THREE.PointsMaterial({
+            color: 0xFFFFE0,
+            size: 2.3,
+            opacity: 0.8,
+            transparent: true,
+            map: starsTexture, // Reutilizar la textura de estrella
+            blending: THREE.AdditiveBlending
+        });
+        const additionalStarField = new THREE.Points(additionalStarsGeometry, additionalStarsMaterial);
+        scene.add(additionalStarField);
+
+        window.onresize = function() {
+            w = window.innerWidth;
+            h = window.innerHeight;
+            if (camera) {
+                camera.aspect = w / h;
+                camera.updateProjectionMatrix();
+            }
+            if (renderer) {
+                renderer.setSize(w, h);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            }
+        };
+    }
+
+
+    function render() {
+        if (!isAnimating || !scene || !camera || !path || !path.getPointAt) {
+            if (renderFrameId) cancelAnimationFrame(renderFrameId);
+            renderFrameId = null; // Limpiar ID
+            isAnimating = false;
+            return;
+        }
+        renderFrameId = requestAnimationFrame(render);
+
+        pct += cameraSpeed;
+        let arrivedAtEnd = false;
+        if (pct >= 0.985) { // Detenerse justo antes del final para evitar problemas con getPointAt(1)
+            pct = 0.9849; // Clavarlo en un valor seguro
+            arrivedAtEnd = true;
+        }
+
+        pct2 += lightSpeed;
+        if (pct2 >= 0.995) pct2 = 0; // Reiniciar para el movimiento de luces
+
+        if (arrivedAtEnd) {
+            hoverTime += 0.015;
+            const hoverOffset = Math.sin(hoverTime) * 0.4;
+            const base = path.getPointAt(0.985); // Usar valores seguros
+            const target = path.getPointAt(0.99); // Usar valores seguros
+            if (base && target) {
+                camera.position.set(base.x, base.y + hoverOffset, base.z);
+                camera.lookAt(target);
+            }
+        } else {
+            const pt1 = path.getPointAt(pct);
+            const lookAheadPct = Math.min(pct + 0.01, 0.995); // Asegurar que no exceda 0.995
+            const pt2 = path.getPointAt(lookAheadPct);
+            if (pt1 && pt2) {
+                camera.position.set(pt1.x, pt1.y, pt1.z);
+                camera.lookAt(pt2);
+            }
+        }
+
+        for (let i = 0; i < lights.length; i++) {
+            const offset = ((i * 13) % 17) / 20 + (i * 0.03);
+            const lightPct = (pct2 + offset) % 0.995; // Asegurar que no exceda 0.995
+            const pos = path.getPointAt(lightPct);
+            if (pos) lights[i].position.set(pos.x, pos.y, pos.z);
+        }
+        if (renderer) renderer.render(scene, camera);
+    }
+
+    function completePortalLoop() {
+        if (renderFrameId) {
+            cancelAnimationFrame(renderFrameId);
+            renderFrameId = null; // Importante limpiar el ID
+        }
+        isAnimating = false;
+        pct = 0; // Reset progress
+        pct2 = 0; // Reset light progress
+
+        if (canvasTunnel) {
+            canvasTunnel.style.transition = "opacity 0.7s ease-out";
+            canvasTunnel.style.opacity = "0";
+        }
+        if (card) card.classList.remove("zoomIn");
+        if (tunnelContainer) tunnelContainer.classList.remove("active");
+
+        setTimeout(() => {
+            if (canvasTunnel) canvasTunnel.style.display = "none"; // Ocultar después de la transición
+            if (card) {
+                card.style.display = "flex";
+                card.style.opacity = "0"; // Empezar invisible para fade in
+                card.style.transform = "scale(0.8)"; // Empezar pequeño para scale up
+                card.style.transition = "all 1s ease-out"; // Transición para la reaparición
+                setTimeout(() => { // Pequeño delay para que las propiedades de transición se apliquen
+                    card.style.opacity = "1";
+                    card.style.transform = "scale(1)";
+                    const portalContent = document.getElementById("portalContent");
+                    if (portalContent) {
+                        portalContent.style.opacity = "1";
+                        portalContent.style.transform = "scale(1)";
+                    }
+                    document.body.style.backgroundImage = `url("http://mattcannon.games/codepen/glow/background.png")`;
+                    document.body.style.backgroundColor = "#0a0a0a";
+                }, 50);
+            }
+        }, 700); // Esperar que la opacidad del túnel llegue a 0
+    }
 });
-
-
-(function () {
-	const canvas = document.getElementById("cardBgEffect"),
-		ctx = canvas.getContext("2d");
-	function resize() {
-		canvas.width = canvas.parentElement.offsetWidth;
-		canvas.height = canvas.parentElement.offsetHeight;
-	}
-	resize();
-	window.addEventListener("resize", resize);
-	const particles = [],
-		particleCount = 50;
-	for (let i = 0; i < particleCount; i++) {
-		particles.push({
-			x: Math.random() * canvas.width,
-			y: Math.random() * canvas.height,
-			radius: Math.random() * 2 + 1,
-			vx: Math.random() * 2 - 1,
-			vy: Math.random() * 2 - 1,
-			color: `rgba(0, ${Math.floor(Math.random() * 150 + 150)}, ${Math.floor(
-				Math.random() * 100 + 180
-			)}, 0.7)`
-		});
-	}
-	function animate() {
-		requestAnimationFrame(animate);
-		ctx.clearRect(0, 0, canvas.width, canvas.height);
-		for (let i = 0; i < particleCount; i++) {
-			const p = particles[i];
-			p.x += p.vx;
-			p.y += p.vy;
-			if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-			if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
-			const gradient = ctx.createRadialGradient(
-				p.x,
-				p.y,
-				0,
-				p.x,
-				p.y,
-				p.radius * 2
-			);
-			gradient.addColorStop(0, "rgba(255,255,255,1)");
-			gradient.addColorStop(1, "rgba(255,255,255,0)");
-			ctx.fillStyle = gradient;
-			ctx.beginPath();
-			ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-			ctx.fill();
-			for (let j = i + 1; j < particleCount; j++) {
-				const p2 = particles[j],
-					distance = Math.sqrt(Math.pow(p.x - p2.x, 2) + Math.pow(p.y - p2.y, 2));
-				if (distance < 100) {
-					ctx.beginPath();
-					ctx.strokeStyle = `rgba(0, 220, 180, ${0.1 * (1 - distance / 100)})`;
-					ctx.lineWidth = 0.5;
-					ctx.moveTo(p.x, p.y);
-					ctx.lineTo(p2.x, p2.y);
-					ctx.stroke();
-				}
-			}
-		}
-	}
-	animate();
-})();
-const card = document.getElementById("portalCard"),
-	button = document.getElementById("portalButton"),
-	canvasTunnel = document.getElementById("tunnelCanvas"),
-	tunnelContainer = document.getElementById("tunnelContainer");
-card.addEventListener("click", startPortal);
-button.addEventListener("click", (e) => {
-	e.stopPropagation();
-	startPortal();
-});
-function startPortal() {
-	// Hide the background immediately
-	document.body.style.backgroundImage = "none";
-	document.body.style.backgroundColor = "#000000";
-
-	canvasTunnel.style.display = "block";
-	tunnelContainer.style.display = "flex";
-	initTunnel();
-	render();
-	setTimeout(() => {
-		canvasTunnel.classList.add("active");
-		card.classList.add("zoomIn");
-		setTimeout(() => {
-			card.style.display = "none";
-		}, 2000);
-	}, 100);
-}
-function createCircularPath() {
-	const points = [];
-	const totalPoints = 200;
-	const controlPoints = [
-		new THREE.Vector3(0, 0, 0),
-		new THREE.Vector3(20, 10, -50),
-		new THREE.Vector3(40, -10, -100),
-		new THREE.Vector3(60, 15, -150),
-		new THREE.Vector3(50, -5, -200),
-		new THREE.Vector3(0, 0, -250),
-		new THREE.Vector3(-100, 0, -200),
-		new THREE.Vector3(-150, 0, -100),
-		new THREE.Vector3(-100, 0, 0),
-		new THREE.Vector3(-50, 10, 100),
-		new THREE.Vector3(-20, -10, 150),
-		new THREE.Vector3(0, 0, 200)
-	];
-	const curve = new THREE.CatmullRomCurve3(controlPoints);
-	curve.tension = 0.1;
-	for (let i = 0; i < totalPoints; i++) {
-		const t = i / (totalPoints - 1),
-			point = curve.getPoint(t);
-		points.push(point);
-	}
-	return points;
-}
-function returnToHome() {
-	const approachAnimation = {
-		progress: 0,
-		duration: 1200,
-		startTime: Date.now(),
-		startPosition: camera.position.clone(),
-		targetPosition: new THREE.Vector3(
-			tunnelEndPoint.x - 5,
-			tunnelEndPoint.y,
-			tunnelEndPoint.z - 5
-		),
-		update: function () {
-			const elapsed = Date.now() - this.startTime;
-			this.progress = Math.min(elapsed / this.duration, 1);
-			const t =
-				this.progress < 0.5
-					? 4 * this.progress * this.progress * this.progress
-					: 1 - Math.pow(-2 * this.progress + 2, 3) / 2;
-			camera.position.lerpVectors(this.startPosition, this.targetPosition, t);
-			if (this.progress >= 1) startPortalTransition();
-		}
-	};
-	function startPortalTransition() {
-		const zoomAnimation = {
-			progress: 0,
-			duration: 800,
-			startTime: Date.now(),
-			startPosition: camera.position.clone(),
-			targetPosition: new THREE.Vector3(
-				tunnelEndPoint.x + 2,
-				tunnelEndPoint.y,
-				tunnelEndPoint.z + 2
-			),
-			update: function () {
-				const elapsed = Date.now() - this.startTime;
-				this.progress = Math.min(elapsed / this.duration, 1);
-				const t = this.progress * this.progress;
-				camera.position.lerpVectors(this.startPosition, this.targetPosition, t);
-				if (this.progress > 0.5 && this.progress < 0.6) {
-					scene.background = new THREE.Color(0xffffff);
-					scene.fog = null;
-				} else if (this.progress >= 0.6) {
-					scene.background = new THREE.Color(0x000000);
-					scene.fog = new THREE.FogExp2(0x000000, 0.005);
-					if (this.progress >= 1) completePortalLoop();
-				}
-			}
-		};
-		animationQueue.push(zoomAnimation);
-	}
-
-	function completePortalLoop() {
-		const tunnelCanvas = document.getElementById("tunnelCanvas");
-		tunnelCanvas.style.transition = "opacity 0.7s ease-out";
-		tunnelCanvas.style.opacity = "0";
-		const card = document.getElementById("portalCard");
-		card.classList.remove("zoomIn");
-		setTimeout(() => {
-			tunnelCanvas.style.display = "none";
-			card.style.display = "flex";
-			card.style.opacity = "0";
-			card.style.transform = "scale(0.8)";
-			card.style.transition = "all 1s ease-out";
-			setTimeout(() => {
-				card.style.opacity = "1";
-				card.style.transform = "scale(1)";
-				const portalContent = document.getElementById("portalContent");
-				portalContent.style.opacity = "1";
-				portalContent.style.transform = "scale(1)";
-			}, 50);
-		}, 700);
-		cancelAnimationFrame(renderFrameId);
-		isAnimating = false;
-	}
-	animationQueue.push(approachAnimation);
-}
-const animationQueue = [];
-let isAnimating = true,
-	tunnelEndPoint,
-	renderFrameId,
-	hoverTime = 0;
-var w = window.innerWidth,
-	h = window.innerHeight;
-var cameraSpeed = 0.00015,
-	lightSpeed = 0.001,
-	tubularSegments = 1200,
-	radialSegments = 12,
-	tubeRadius = 3;
-var renderer, scene, camera, tube;
-var lights = [],
-	path,
-	geometry,
-	material,
-	pct = 0,
-	pct2 = 0;
-function captureCardFrontImage() {
-	const canvas = document.createElement("canvas");
-	canvas.width = 1280;
-	canvas.height = 1820;
-	const ctx = canvas.getContext("2d");
-	ctx.fillStyle = "rgba(10, 12, 18, 0.6)";
-	ctx.fillRect(0, 0, canvas.width, canvas.height);
-	const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-	gradient.addColorStop(0, "#00ffaa");
-	gradient.addColorStop(1, "#00a3ff");
-	function drawBlob(x, y, wid, hei, color) {
-		const grad = ctx.createRadialGradient(x, y, 0, x, y, wid / 2);
-		grad.addColorStop(0, color);
-		grad.addColorStop(1, "rgba(0,0,0,0)");
-		ctx.fillStyle = grad;
-		ctx.beginPath();
-		ctx.ellipse(x, y, wid / 2, hei / 2, 0, 0, Math.PI * 2);
-		ctx.fill();
-	}
-	ctx.filter = "blur(12px)";
-	drawBlob(150, 300, 250, 250, "rgba(0, 255, 170, 0.7)");
-	drawBlob(350, 200, 200, 200, "rgba(0, 179, 255, 0.7)");
-	drawBlob(250, 500, 180, 180, "rgba(64, 224, 208, 0.7)");
-	drawBlob(400, 600, 220, 220, "rgba(30, 144, 255, 0.7)");
-	ctx.filter = "none";
-	ctx.font = "300 40px Unica One";
-	ctx.fillStyle = "white";
-	ctx.textAlign = "center";
-	ctx.textBaseline = "middle";
-	ctx.shadowColor = "rgba(0, 255, 170, 0.7)";
-	ctx.shadowBlur = 15;
-	ctx.fillText("ENTER THE", canvas.width / 2, canvas.height / 2 - 30);
-	ctx.fillText("WEB PORTAL", canvas.width / 2, canvas.height / 2 + 30);
-	ctx.shadowBlur = 0;
-	const buttonX = canvas.width / 2,
-		buttonY = canvas.height / 2 + 120;
-	ctx.fillStyle = "rgba(10, 12, 20, 0.3)";
-	ctx.strokeStyle = "#00ffaa";
-	ctx.lineWidth = 2;
-	ctx.beginPath();
-	if (ctx.roundRect) {
-		ctx.roundRect(buttonX - 38, buttonY - 16, 76, 32, 16);
-	} else {
-		ctx.moveTo(buttonX - 38, buttonY - 16);
-		ctx.lineTo(buttonX + 38, buttonY - 16);
-		ctx.lineTo(buttonX + 38, buttonY + 16);
-		ctx.lineTo(buttonX - 38, buttonY + 16);
-		ctx.closePath();
-	}
-	ctx.fill();
-	ctx.stroke();
-	ctx.font = "400 20px Unica One";
-	ctx.fillStyle = "white";
-	ctx.shadowColor = "rgba(0, 255, 255, 0.5)";
-	ctx.shadowBlur = 5;
-	ctx.fillText("GO", buttonX, buttonY);
-	return canvas;
-}
-function createBackOfPortalCard() {
-	const geometry = new THREE.PlaneGeometry(20, 28);
-
-	// Create a new canvas for the back of the card rather than flipping
-	const canvas = document.createElement("canvas");
-	canvas.width = 1280;
-	canvas.height = 1820;
-	const ctx = canvas.getContext("2d");
-
-	// Match the front card but with slight variation
-	ctx.fillStyle = "rgba(10, 12, 18, 0.6)";
-	ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-	// Same gradient but reversed direction
-	const gradient = ctx.createLinearGradient(canvas.width, canvas.height, 0, 0);
-	gradient.addColorStop(0, "#00ffaa");
-	gradient.addColorStop(1, "#00a3ff");
-
-	// Create blobs with same function from captureCardFrontImage
-	function drawBlob(x, y, wid, hei, color) {
-		const grad = ctx.createRadialGradient(x, y, 0, x, y, wid / 2);
-		grad.addColorStop(0, color);
-		grad.addColorStop(1, "rgba(0,0,0,0)");
-		ctx.fillStyle = grad;
-		ctx.beginPath();
-		ctx.ellipse(x, y, wid / 2, hei / 2, 0, 0, Math.PI * 2);
-		ctx.fill();
-	}
-
-	// Add glowing blobs in different positions
-	ctx.filter = "blur(12px)";
-	drawBlob(400, 400, 250, 250, "rgba(0, 255, 170, 0.7)");
-	drawBlob(200, 300, 200, 200, "rgba(0, 179, 255, 0.7)");
-	drawBlob(350, 700, 180, 180, "rgba(64, 224, 208, 0.7)");
-	drawBlob(200, 900, 220, 220, "rgba(30, 144, 255, 0.7)");
-	ctx.filter = "none";
-
-	// Add text to back of card
-	ctx.font = "300 40px Unica One";
-	ctx.fillStyle = "white";
-	ctx.textAlign = "center";
-	ctx.textBaseline = "middle";
-	ctx.shadowColor = "rgba(0, 255, 170, 0.7)";
-	ctx.shadowBlur = 15;
-	ctx.fillText("EYBAGIT", canvas.width / 2, canvas.height / 2 - 30);
-	ctx.fillText("¡PROXIMAMENTE!", canvas.width / 2, canvas.height / 2 + 30);
-	ctx.shadowBlur = 0;
-
-	// Create a texture from the canvas
-	const texture = new THREE.CanvasTexture(canvas);
-	const material = new THREE.MeshBasicMaterial({
-		map: texture,
-		transparent: true,
-		opacity: 0.9,
-		side: THREE.DoubleSide
-	});
-
-	return new THREE.Mesh(geometry, material);
-}
-function createCodeSnippetSprite(text) {
-	const canvas = document.createElement("canvas");
-	canvas.width = 300;
-	canvas.height = 150;
-	const ctx = canvas.getContext("2d");
-	ctx.fillStyle = "#2d2d2d";
-	ctx.fillRect(0, 0, canvas.width, canvas.height);
-	ctx.font = "20px monospace";
-	ctx.fillStyle = "#8be9fd";
-	ctx.textAlign = "left";
-	ctx.textBaseline = "top";
-	let lines = text.split("\n");
-	for (let i = 0; i < lines.length; i++) {
-		ctx.fillText(lines[i], 10, 10 + i * 24);
-	}
-	const texture = new THREE.CanvasTexture(canvas);
-	texture.minFilter = THREE.LinearFilter;
-	const material = new THREE.SpriteMaterial({
-		map: texture,
-		transparent: true
-	});
-	const sprite = new THREE.Sprite(material);
-	sprite.scale.set(15, 7.5, 1);
-	return sprite;
-}
-function initTunnel() {
-	renderer = new THREE.WebGLRenderer({
-		canvas: canvasTunnel,
-		antialias: true,
-		alpha: true,
-		powerPreference: "high-performance"
-	});
-	renderer.setSize(w, h);
-	scene = new THREE.Scene();
-	scene.fog = new THREE.FogExp2(0x000000, 0.005);
-	camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 1000);
-	const raycaster = new THREE.Raycaster(),
-		mouse = new THREE.Vector2();
-	canvasTunnel.addEventListener("click", function (event) {
-		mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-		mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-		raycaster.setFromCamera(mouse, camera);
-		const intersects = raycaster.intersectObjects(scene.children);
-		for (let i = 0; i < intersects.length; i++) {
-			if (
-				intersects[i].object.userData &&
-				intersects[i].object.userData.isBackCard
-			) {
-				returnToHome();
-				break;
-			}
-		}
-	});
-	const starsCount = 2000;
-	const starsPositions = new Float32Array(starsCount * 3);
-	for (let i = 0; i < starsCount; i++) {
-		starsPositions[i * 3] = THREE.MathUtils.randFloatSpread(1500);
-		starsPositions[i * 3 + 1] = THREE.MathUtils.randFloatSpread(1500);
-		starsPositions[i * 3 + 2] = THREE.MathUtils.randFloatSpread(1500);
-	}
-	const starsGeometry = new THREE.BufferGeometry();
-	starsGeometry.setAttribute(
-		"position",
-		new THREE.BufferAttribute(starsPositions, 3)
-	);
-	const starsTexture = new THREE.CanvasTexture(createCircleTexture());
-	const starsMaterial = new THREE.PointsMaterial({
-		color: 0xffffff,
-		size: 1,
-		map: starsTexture,
-		transparent: true
-	});
-	const starField = new THREE.Points(starsGeometry, starsMaterial);
-	scene.add(starField);
-	const organicPoints = createCircularPath();
-	path = new THREE.CatmullRomCurve3(organicPoints);
-	const tubeGeometry = new THREE.TubeBufferGeometry(
-		path,
-		tubularSegments,
-		tubeRadius,
-		radialSegments,
-		false
-	);
-	const colors = [];
-	for (let i = 0; i < tubeGeometry.attributes.position.count; i++) {
-		const color = new THREE.Color(i % 2 === 0 ? "#00a3ff" : "#00ffaa");
-		colors.push(color.r, color.g, color.b);
-	}
-	tubeGeometry.setAttribute(
-		"color",
-		new THREE.Float32BufferAttribute(colors, 3)
-	);
-	material = new THREE.MeshLambertMaterial({
-		side: THREE.BackSide,
-		vertexColors: true,
-		wireframe: true,
-		emissive: 0x333333,
-		emissiveIntensity: 0.4
-	});
-	tube = new THREE.Mesh(tubeGeometry, material);
-	scene.add(tube);
-	const backOfCard = createBackOfPortalCard();
-	const endPoint = organicPoints.length - 1;
-	const position = organicPoints[endPoint];
-	backOfCard.position.set(position.x, position.y, position.z);
-	tunnelEndPoint = position;
-	backOfCard.lookAt(organicPoints[endPoint - 5]);
-	backOfCard.userData = { isBackCard: true };
-	scene.add(backOfCard);
-	const mainLight = new THREE.PointLight(0xffffff, 1, 50);
-	scene.add(mainLight);
-	scene.add(new THREE.AmbientLight(0x555555));
-	const lightColors = [0x00a3ff, 0x00ffaa, 0x00a3ff, 0x00ffaa, 0xffffff];
-	for (let i = 0; i < 5; i++) {
-		const offset = i * 0.15 + (i % 3) * 0.05;
-		let l = new THREE.PointLight(lightColors[i], 1.2, 20);
-		lights.push(l);
-		scene.add(l);
-	}
-	const snippetVarieties = [
-		// HTML Card Snippet
-		[
-			'<div class="card">',
-			"  <h1>Let it Glow</h1>",
-			"  <p>With a little bit of CSS light.</p>",
-			"</div>"
-		].join("\n"),
-
-		// CSS Glow Snippet
-		[
-			".card {",
-			"  background-color: #1b1b1b;",
-			"  border-radius: 12px;",
-			"  box-shadow: 0 8px 20px -4px greenyellow;",
-			"}"
-		].join("\n"),
-
-		// Advanced Glow CSS
-		[
-			".glow-card {",
-			"  box-shadow:",
-			"    0 0 10px rgba(0, 255, 170, 0.5),",
-			"    0 0 20px rgba(0, 255, 170, 0.3),",
-			"    inset 0 0 10px rgba(0, 255, 170, 0.2);",
-			"}"
-		].join("\n"),
-
-		// JavaScript Interaction
-		[
-			"document.querySelector('.card').addEventListener('mousemove', (e) => {",
-			"  const { x, y } = e;",
-			"  updateGlowPosition(x, y);",
-			"});"
-		].join("\n"),
-
-		// Card Animation
-		[
-			"@keyframes pulse-glow {",
-			"  0% { box-shadow: 0 0 10px #00ffaa; }",
-			"  50% { box-shadow: 0 0 30px #00a3ff; }",
-			"  100% { box-shadow: 0 0 10px #00ffaa; }",
-			"}"
-		].join("\n"),
-
-		// Reactive Glow Function
-		[
-			"function createDirectionalGlow(event, element) {",
-			"  const rect = element.getBoundingClientRect();",
-			"  const x = event.clientX - rect.left;",
-			"  const y = event.clientY - rect.top;",
-			"  // Set glow position based on cursor",
-			"}"
-		].join("\n"),
-
-		// SVG Filter Glow
-		[
-			'<filter id="glow">',
-			'  <feGaussianBlur stdDeviation="5" result="blur"/>',
-			'  <feColorMatrix in="blur" values="0 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 15 0"/>',
-			"</filter>"
-		].join("\n"),
-
-		// CSS Variables for Glow
-		[
-			":root {",
-			"  --glow-color: #00ffaa;",
-			"  --glow-spread: 8px;",
-			"  --glow-opacity: 0.7;",
-			"}"
-		].join("\n"),
-
-		// Card Hover Effect
-		[
-			".card:hover {",
-			"  box-shadow:",
-			"    0 0 15px rgba(0, 255, 170, 0.8),",
-			"    0 0 30px rgba(0, 255, 170, 0.4);",
-			"  transition: box-shadow 0.3s ease;",
-			"}"
-		].join("\n")
-	];
-
-	for (let i = 0; i < 100; i++) {
-		// Use a random snippet from our variety
-		let snippet =
-			snippetVarieties[Math.floor(Math.random() * snippetVarieties.length)];
-		let sprite = createCodeSnippetSprite(snippet);
-		sprite.position.set(
-			(Math.random() - 0.5) * 400,
-			(Math.random() - 0.5) * 400,
-			(Math.random() - 0.5) * 400
-		);
-		scene.add(sprite);
-	}
-
-	// Add more white/star particles
-	const additionalStars = 5000;
-	const additionalStarsPositions = new Float32Array(additionalStars * 3);
-	for (let i = 0; i < additionalStars; i++) {
-		additionalStarsPositions[i * 3] = THREE.MathUtils.randFloatSpread(2000);
-		additionalStarsPositions[i * 3 + 1] = THREE.MathUtils.randFloatSpread(2000);
-		additionalStarsPositions[i * 3 + 2] = THREE.MathUtils.randFloatSpread(2000);
-	}
-	const additionalStarsGeometry = new THREE.BufferGeometry();
-	additionalStarsGeometry.setAttribute(
-		"position",
-		new THREE.BufferAttribute(additionalStarsPositions, 3)
-	);
-	const additionalStarsMaterial = new THREE.PointsMaterial({
-		color: 0xffffff,
-		size: 2,
-		opacity: 0.7,
-		transparent: true,
-		map: starsTexture
-	});
-	const additionalStarField = new THREE.Points(
-		additionalStarsGeometry,
-		additionalStarsMaterial
-	);
-	scene.add(additionalStarField);
-	window.onresize = function () {
-		w = window.innerWidth;
-		h = window.innerHeight;
-		camera.aspect = w / h;
-		camera.updateProjectionMatrix();
-		renderer.setSize(w, h);
-	};
-}
-function createCircleTexture() {
-	const canvas = document.createElement("canvas");
-	canvas.width = 32;
-	canvas.height = 32;
-	const context = canvas.getContext("2d");
-
-	// Draw a circle
-	context.beginPath();
-	context.arc(16, 16, 16, 0, 2 * Math.PI, false);
-	context.fillStyle = "white";
-	context.fill();
-
-	// Add a soft glow effect
-	const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 16);
-	gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
-	gradient.addColorStop(0.5, "rgba(255, 255, 255, 0.5)");
-	gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-
-	context.globalCompositeOperation = "source-over";
-	context.fillStyle = gradient;
-	context.beginPath();
-	context.arc(16, 16, 16, 0, 2 * Math.PI, false);
-	context.fill();
-
-	return canvas;
-}
-
-function render() {
-	pct += cameraSpeed;
-	if (pct >= 0.995) {
-		pct = 0;
-	}
-	pct2 += lightSpeed;
-	if (pct2 >= 0.995) {
-		pct2 = 0;
-	}
-	const pt1 = path.getPointAt(pct),
-		lookAheadPct = Math.min(pct + 0.01, 0.995),
-		pt2 = path.getPointAt(lookAheadPct);
-	camera.position.set(pt1.x, pt1.y, pt1.z);
-	camera.lookAt(pt2);
-	const mainLight = lights[0];
-	mainLight.position.set(pt2.x, pt2.y, pt2.z);
-	for (let i = 1; i < lights.length; i++) {
-		const offset = ((i * 13) % 17) / 20,
-			lightPct = (pct2 + offset) % 0.995,
-			pos = path.getPointAt(lightPct);
-		lights[i].position.set(pos.x, pos.y, pos.z);
-	}
-	renderer.render(scene, camera);
-	if (pct < 0.985) {
-		if (pct < 0.985) {
-			// Continue through tunnel
-			const pt1 = path.getPointAt(pct);
-			const pt2 = path.getPointAt(Math.min(pct + 0.01, 1));
-
-			camera.position.set(pt1.x, pt1.y, pt1.z);
-			camera.lookAt(pt2);
-
-			// Move lights with camera
-			const mainLight = lights[0];
-			mainLight.position.set(pt2.x, pt2.y, pt2.z);
-
-			for (let i = 1; i < lights.length; i++) {
-				const offset = ((i * 13) % 17) / 20;
-				const lightPct = (pct2 + offset) % 0.995;
-				const pos = path.getPointAt(lightPct);
-				lights[i].position.set(pos.x, pos.y, pos.z);
-			}
-
-			pct += cameraSpeed;
-			pct2 += lightSpeed;
-			renderFrameId = requestAnimationFrame(render);
-		} else {
-			// Float in place at the end of the tunnel
-			hoverTime += 0.02;
-			const hoverOffset = Math.sin(hoverTime) * 0.5;
-
-			const base = path.getPointAt(0.985);
-			const target = path.getPointAt(0.99);
-
-			camera.position.set(base.x, base.y + hoverOffset, base.z);
-			camera.lookAt(target);
-
-			renderFrameId = requestAnimationFrame(render);
-		}
-	}
-}
-function createCodeSnippetSprite(text) {
-	const canvas = document.createElement("canvas");
-	canvas.width = 400;
-	canvas.height = 250;
-	const ctx = canvas.getContext("2d");
-
-	// Fully transparent background, no border
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-	// Syntax highlighting colors from popular themes
-	const colors = {
-		keyword: "#ff79c6", // pink
-		string: "#f1fa8c", // yellow
-		comment: "#6272a4", // blue-grey
-		function: "#50fa7b", // green
-		variable: "#8be9fd", // cyan
-		tag: "#ff79c6", // pink
-		attribute: "#50fa7b" // green
-	};
-
-	ctx.font = "20px 'Consolas', monospace";
-	ctx.textAlign = "left";
-	ctx.textBaseline = "top";
-
-	const lines = text.split("\n");
-
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
-		let xPosition = 15;
-
-		// Extremely simple syntax highlighting
-		if (
-			line.includes("const ") ||
-			line.includes("function ") ||
-			line.includes("if(") ||
-			line.includes("return")
-		) {
-			// Keywords and flow control
-			const parts = line.split(/\b/);
-			for (const part of parts) {
-				if (
-					[
-						"const",
-						"function",
-						"return",
-						"if",
-						"class",
-						"=>",
-						"import",
-						"export"
-					].includes(part)
-				) {
-					ctx.fillStyle = colors.keyword;
-				} else if (part.startsWith('"') || part.startsWith("'")) {
-					ctx.fillStyle = colors.string;
-				} else if (part.startsWith("//")) {
-					ctx.fillStyle = colors.comment;
-				} else if (part.match(/^[a-zA-Z_][a-zA-Z0-9_]*\(/)) {
-					ctx.fillStyle = colors.function;
-				} else if (part.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/)) {
-					ctx.fillStyle = colors.variable;
-				} else {
-					ctx.fillStyle = "#f8f8f2"; // default text color
-				}
-
-				const width = ctx.measureText(part).width;
-				ctx.fillText(part, xPosition, 15 + i * 24);
-				xPosition += width;
-			}
-		} else if (line.includes("<") && line.includes(">")) {
-			// HTML-like syntax
-			const parts = line.split(/(<\/?[a-zA-Z0-9-]+|>|="[^"]*")/g);
-			for (const part of parts) {
-				if (part.startsWith("<") && !part.startsWith("</")) {
-					ctx.fillStyle = colors.tag;
-				} else if (part.startsWith("</") || part === ">") {
-					ctx.fillStyle = colors.tag;
-				} else if (part.startsWith("=")) {
-					ctx.fillStyle = colors.attribute;
-				} else if (part.startsWith('"')) {
-					ctx.fillStyle = colors.string;
-				} else {
-					ctx.fillStyle = "#f8f8f2"; // default text color
-				}
-
-				const width = ctx.measureText(part).width;
-				ctx.fillText(part, xPosition, 15 + i * 24);
-				xPosition += width;
-			}
-		} else if (line.includes("{") || line.includes("}") || line.includes(";")) {
-			// CSS-like syntax
-			ctx.fillStyle = "#f8f8f2"; // default for CSS
-			ctx.fillText(line, xPosition, 15 + i * 24);
-		} else {
-			// Default rendering
-			ctx.fillStyle = "#f8f8f2";
-			ctx.fillText(line, 15, 15 + i * 24);
-		}
-	}
-
-	const texture = new THREE.CanvasTexture(canvas);
-	texture.minFilter = THREE.LinearFilter;
-	const material = new THREE.SpriteMaterial({
-		map: texture,
-		transparent: true,
-		opacity: 0.8,
-		blending: THREE.AdditiveBlending
-	});
-
-	const sprite = new THREE.Sprite(material);
-
-	// Randomize scale for variety
-	let scaleFactor = 8 + Math.random() * 12;
-	sprite.scale.set(scaleFactor, scaleFactor * (canvas.height / canvas.width), 1);
-
-	return sprite;
-}
-
-
-
